@@ -1,4 +1,7 @@
 const app = document.querySelector("#app");
+const TOKYO_TIME_ZONE = "Asia/Tokyo";
+const BASE_WORK_MINUTES = 8 * 60;
+
 function icon(name) {
   return `<span class="icon" aria-hidden="true">${icons[name] || ""}</span>`;
 }
@@ -17,40 +20,94 @@ function escapeHtml(value = "") {
 }
 function currentPath() {
   const hash = window.location.hash.replace("#", "");
-  return hash || "/dashboard";
+  if (hash) return hash;
+  return window.location.pathname.replace(/\/$/, "") === "/login" ? "/login" : "/dashboard";
 }
 function normalizePath(path) {
+  if (path === "/login") return "/login";
   if (path.startsWith("/clock-correction/edit") || path.startsWith("/history/edit")) return "/clock-correction/edit";
   return pageMeta[path] ? path : "/dashboard";
 }
 function canAccessPath(path) {
   return state.role === "admin" || !path.startsWith("/admin");
 }
-function todayLabel() {
+function demoUserForRole(role) {
+  return role === "admin"
+    ? { name: "鈴木 美咲", email: "admin@example.com", department: "管理部", role }
+    : { name: "田中 花子", email: "member@example.com", department: "営業部", role };
+}
+function userFromProfile(profile) {
+  return {
+    id: profile.id,
+    name: profile.full_name,
+    email: profile.email,
+    department: profile.department || "",
+    role: profile.role === "admin" ? "admin" : "member"
+  };
+}
+function applyAuthProfile(profile) {
+  const user = userFromProfile(profile);
+  state.role = user.role;
+  state.loginRole = user.role;
+  state.currentUser = user;
+  state.isLoggedIn = true;
+  state.authError = "";
+  if (!state.employees.some((employee) => employee.name === user.name)) {
+    state.employees = [
+      { name: user.name, department: user.department || "-", role: user.role, status: "未出勤", today: "-", month: "0:00" },
+      ...state.employees
+    ];
+  }
+}
+function clearAuthState() {
+  state.isLoggedIn = false;
+  state.sidebarOpen = false;
+  state.authMode = "login";
+  state.role = "member";
+  state.loginRole = "member";
+  state.currentUser = null;
+}
+function setAuthPending(pending) {
+  state.authPending = pending;
+}
+function todayLabel(value = new Date()) {
   return new Intl.DateTimeFormat("ja-JP", {
     dateStyle: "full",
-    timeZone: "Asia/Tokyo"
-  }).format(new Date());
+    timeZone: TOKYO_TIME_ZONE
+  }).format(new Date(value));
 }
-function nowTime() {
+function utcToJapanTime(value, options = {}) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("ja-JP", {
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Tokyo"
-  }).format(new Date());
+    ...(options.seconds === false ? {} : { second: "2-digit" }),
+    hourCycle: "h23",
+    timeZone: TOKYO_TIME_ZONE
+  }).format(date);
 }
-function currentIsoDate() {
-  return new Intl.DateTimeFormat("en-CA", {
+function nowTime(value = new Date()) {
+  return utcToJapanTime(value);
+}
+function currentIsoDate(value = new Date()) {
+  return new Intl.DateTimeFormat("ja-JP", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    timeZone: "Asia/Tokyo"
-  }).format(new Date());
+    timeZone: TOKYO_TIME_ZONE
+  }).format(new Date(value)).replace(/\//g, "-");
 }
 function toDisplayDate(isoDate) {
   return isoDate ? isoDate.replace(/-/g, "/") : "";
+}
+function toMinuteTime(time) {
+  return time && time !== "-" ? time.slice(0, 5) : "";
+}
+function formatMinutes(minutes) {
+  const safeMinutes = Math.max(Math.round(minutes), 0);
+  return `${Math.floor(safeMinutes / 60)}:${String(safeMinutes % 60).padStart(2, "0")}`;
 }
 function nextNumericId(items) {
   return items.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0) + 1;
@@ -65,7 +122,161 @@ function calendarCells(year, monthIndex) {
   while (cells.length % 7) cells.push(null);
   return cells;
 }
+function normalizeBreaks(breaks) {
+  if (Array.isArray(breaks)) return breaks;
+  if (typeof breaks === "string") {
+    try {
+      const parsed = JSON.parse(breaks);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+  return [];
+}
+function totalBreakMinutes(breaks) {
+  return normalizeBreaks(breaks).reduce((total, item) => {
+    if (!item.start || !item.end) return total;
+    const minutes = (new Date(item.end).getTime() - new Date(item.start).getTime()) / 60000;
+    return total + Math.max(minutes, 0);
+  }, 0);
+}
+function recordBreakMinutes(record) {
+  return Math.round(Number(record?.break_minutes) || totalBreakMinutes(record?.breaks));
+}
+function attendanceStatus(record) {
+  if (!record?.clock_in) return "not_started";
+  if (record.clock_out) return "done";
+  return record.status === "break" ? "break" : "working";
+}
+function buildAttendanceLogs(record) {
+  const logs = [];
+  if (record?.clock_in) {
+    logs.push({
+      at: record.clock_in,
+      time: utcToJapanTime(record.clock_in),
+      label: `出勤打刻（${record.work_type || "出社"}）`
+    });
+  }
+  normalizeBreaks(record?.breaks).forEach((item) => {
+    if (item.start) {
+      logs.push({ at: item.start, time: utcToJapanTime(item.start), label: "休憩開始" });
+    }
+    if (item.end) {
+      logs.push({ at: item.end, time: utcToJapanTime(item.end), label: "休憩終了" });
+    }
+  });
+  if (record?.clock_out) {
+    logs.push({ at: record.clock_out, time: utcToJapanTime(record.clock_out), label: "退勤打刻" });
+  }
+  return logs
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+    .map(({ time, label }) => ({ time, label }));
+}
+function attendanceSummary(record) {
+  if (!record?.clock_in) return { work: "-", overtime: "-" };
+  if (!record.clock_out) return { work: "進行中", overtime: "-" };
+  const worked = (new Date(record.clock_out).getTime() - new Date(record.clock_in).getTime()) / 60000 - recordBreakMinutes(record);
+  return {
+    work: formatMinutes(worked),
+    overtime: formatMinutes(Math.max(worked - BASE_WORK_MINUTES, 0))
+  };
+}
+function syncTodayHistory(record) {
+  const workDate = record?.work_date || currentIsoDate();
+  const summary = attendanceSummary(record);
+  const row = {
+    id: workDate,
+    date: toDisplayDate(workDate),
+    clockIn: record?.clock_in ? utcToJapanTime(record.clock_in, { seconds: false }) : "-",
+    clockOut: record?.clock_out ? utcToJapanTime(record.clock_out, { seconds: false }) : "",
+    work: summary.work,
+    overtime: summary.overtime,
+    status: record?.clock_out ? "normal" : attendanceStatus(record),
+    workType: record?.work_type || state.attendance.workType
+  };
+  state.history = [row, ...state.history.filter((item) => item.id !== workDate)];
+}
+function updateCurrentEmployeeSummary() {
+  if (!state.currentUser?.name) return;
+  const clockIn = toMinuteTime(state.attendance.clockIn);
+  const clockOut = toMinuteTime(state.attendance.clockOut);
+  const today = clockIn ? `${clockIn} - ${clockOut}` : "-";
+  const status = statusLabels[state.attendance.status] || "未出勤";
+  state.employees = state.employees.map((employee) => {
+    if (employee.name !== state.currentUser.name) return employee;
+    return { ...employee, status, today };
+  });
+}
+function resetTodayAttendance() {
+  state.attendance = {
+    ...state.attendance,
+    id: null,
+    workDate: currentIsoDate(),
+    status: "not_started",
+    clockIn: "",
+    clockOut: "",
+    breakCount: 0,
+    breakMinutes: 0,
+    breaks: [],
+    logs: []
+  };
+  syncTodayHistory(null);
+  updateCurrentEmployeeSummary();
+}
+function applyAttendanceRecord(record) {
+  if (!record) {
+    resetTodayAttendance();
+    return;
+  }
+  const breaks = normalizeBreaks(record.breaks);
+  state.attendance = {
+    ...state.attendance,
+    id: record.id,
+    workDate: record.work_date,
+    status: attendanceStatus(record),
+    workType: record.work_type || state.attendance.workType || "出社",
+    clockIn: record.clock_in ? utcToJapanTime(record.clock_in) : "",
+    clockOut: record.clock_out ? utcToJapanTime(record.clock_out) : "",
+    breakCount: breaks.length,
+    breakMinutes: recordBreakMinutes(record),
+    breaks,
+    logs: buildAttendanceLogs(record)
+  };
+  syncTodayHistory(record);
+  updateCurrentEmployeeSummary();
+}
+async function loadTodayAttendance() {
+  if (!state.currentUser?.id || !window.supabaseAuth?.getAttendanceByDate) {
+    resetTodayAttendance();
+    return null;
+  }
+  const record = await window.supabaseAuth.getAttendanceByDate(state.currentUser.id, currentIsoDate());
+  applyAttendanceRecord(record);
+  return record;
+}
+async function loadTodayAttendanceSafely() {
+  try {
+    return await loadTodayAttendance();
+  } catch (error) {
+    console.error(error);
+    state.toast = "本日の勤怠情報を取得できませんでした。";
+    return null;
+  }
+}
 function setPath(path) {
+  if (path === "/login") {
+    if (window.location.pathname.replace(/\/$/, "") === "/login") {
+      window.location.hash = "";
+      return;
+    }
+    window.location.href = "/login/";
+    return;
+  }
+  if (window.location.pathname.replace(/\/$/, "") === "/login") {
+    window.location.href = `/#${path}`;
+    return;
+  }
   window.location.hash = path;
 }
 function setToast(message) {
@@ -80,8 +291,17 @@ function setToast(message) {
 }
 function render() {
   state.path = normalizePath(currentPath());
+  if (!state.authReady) {
+    app.innerHTML = renderAuthLoading();
+    return;
+  }
   if (!state.isLoggedIn) {
+    if (state.path !== "/login") setPath("/login");
     app.innerHTML = renderLogin();
+    return;
+  }
+  if (state.path === "/login") {
+    setPath("/dashboard");
     return;
   }
   if (!canAccessPath(state.path)) {
@@ -108,7 +328,7 @@ function render() {
     </div>
   `;
 }
-function renderLogin() {
+function renderAuthLoading() {
   return `
     <main class="login-shell">
       <section class="login-panel">
@@ -120,22 +340,51 @@ function renderLogin() {
           </div>
         </div>
         <div class="login-copy">
-          <h1>ログイン</h1>
-          <p>利用するアカウント種別を選択してログインしてください。</p>
+          <h1>認証確認中</h1>
+          <p>Supabaseのセッションを確認しています。</p>
         </div>
-        <div class="role-toggle login-role-toggle" aria-label="ログイン種別">
-          <button class="${state.loginRole === "member" ? "active" : ""}" data-login-role="member">社員</button>
-          <button class="${state.loginRole === "admin" ? "active" : ""}" data-login-role="admin">管理者</button>
+      </section>
+    </main>
+  `;
+}
+function renderLogin() {
+  const isSignup = state.authMode === "signup";
+  const configNotice = !window.supabaseAuth?.isConfigured()
+    ? '<div class="notice">supabase-config.js に anon key を設定してください。</div>'
+    : "";
+  const submitLabel = state.authPending
+    ? isSignup ? "登録中" : "ログイン中"
+    : isSignup ? "新規登録" : "ログイン";
+  return `
+    <main class="login-shell">
+      <section class="login-panel">
+        <div class="brand login-brand">
+          <div class="brand-mark">${icon("clock")}</div>
+          <div>
+            <strong>勤怠管理</strong>
+            <span>Attendance App</span>
+          </div>
         </div>
-        <div class="form-field">
-          <label>メールアドレス</label>
-          <input class="input" value="${state.loginRole === "admin" ? "admin@example.com" : "member@example.com"}" />
+        <div class="login-copy">
+          <h1>${isSignup ? "サインアップ" : "ログイン"}</h1>
+          <p>${isSignup ? "メールアドレスとパスワードでアカウントを作成します。" : "登録済みのメールアドレスとパスワードでログインします。"}</p>
         </div>
-        <div class="form-field">
-          <label>パスワード</label>
-          <input class="input" type="password" value="password" />
-        </div>
-        <button class="button primary login-button" data-action="login">${icon("check")}ログイン</button>
+        <form class="auth-form" data-auth-form="${isSignup ? "signup" : "login"}">
+          <div class="form-field">
+            <label for="${isSignup ? "signup-email" : "login-email"}">メールアドレス</label>
+            <input class="input" id="${isSignup ? "signup-email" : "login-email"}" type="email" autocomplete="email" placeholder="name@example.com" required />
+          </div>
+          <div class="form-field">
+            <label for="${isSignup ? "signup-password" : "login-password"}">パスワード</label>
+            <input class="input" id="${isSignup ? "signup-password" : "login-password"}" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" minlength="6" required />
+          </div>
+          <button class="button primary login-button" type="submit" ${state.authPending ? "disabled" : ""}>${icon("check")}${submitLabel}</button>
+        </form>
+        <button class="button neutral login-button" type="button" data-auth-mode="${isSignup ? "login" : "signup"}" ${state.authPending ? "disabled" : ""}>
+          ${isSignup ? "ログインに戻る" : "新規アカウントを作成"}
+        </button>
+        ${configNotice}
+        ${state.authError ? `<div class="notice">${escapeHtml(state.authError)}</div>` : ""}
         ${state.toast ? `<div class="notice">${state.toast}</div>` : ""}
       </section>
     </main>
@@ -186,7 +435,8 @@ function renderBottomNav() {
   return `<nav class="bottom-nav" aria-label="画面下部ナビゲーション">${items}</nav>`;
 }
 function renderAccount() {
-  const name = state.role === "admin" ? "鈴木 美咲" : "田中 花子";
+  const user = state.currentUser || demoUserForRole(state.role);
+  const name = user.name;
   const roleText = state.role === "admin" ? "管理者" : "一般社員";
   return `
     <div class="account">
@@ -350,6 +600,7 @@ function renderDashboard() {
 }
 function renderAttendance() {
   const status = state.attendance.status;
+  const pending = state.punchPending;
   return `
     <section class="status-hero">
       <div class="clock-panel">
@@ -372,21 +623,21 @@ function renderAttendance() {
         </div>
         <div class="form-field attendance-type-field">
           <label>出勤形態</label>
-          <select class="select" id="attendance-work-type" ${status === "done" ? "disabled" : ""}>
+          <select class="select" id="attendance-work-type" ${status === "done" || pending ? "disabled" : ""}>
             ${attendanceTypes.map((type) => `<option value="${type}" ${state.attendance.workType === type ? "selected" : ""}>${type}</option>`).join("")}
           </select>
         </div>
         <div class="actions-grid">
-          <button class="action-button primary" data-punch="clockIn" ${status !== "not_started" ? "disabled" : ""}>
+          <button class="action-button primary" data-punch="clockIn" ${status !== "not_started" || pending ? "disabled" : ""}>
             <strong>出勤</strong><span>勤務を開始</span>
           </button>
-          <button class="action-button secondary" data-punch="breakStart" ${status !== "working" ? "disabled" : ""}>
+          <button class="action-button secondary" data-punch="breakStart" ${status !== "working" || pending ? "disabled" : ""}>
             <strong>休憩開始</strong><span>休憩に入る</span>
           </button>
-          <button class="action-button secondary" data-punch="breakEnd" ${status !== "break" ? "disabled" : ""}>
+          <button class="action-button secondary" data-punch="breakEnd" ${status !== "break" || pending ? "disabled" : ""}>
             <strong>休憩終了</strong><span>勤務に戻る</span>
           </button>
-          <button class="action-button danger" data-punch="clockOut" ${status !== "working" ? "disabled" : ""}>
+          <button class="action-button danger" data-punch="clockOut" ${status !== "working" || pending ? "disabled" : ""}>
             <strong>退勤</strong><span>勤務を終了</span>
           </button>
         </div>
@@ -673,48 +924,229 @@ function renderApprovalItem(item) {
     </article>
   `;
 }
-function addPunchHistory(action, time, status) {
+function addPunchHistory(action, time, status, options = {}) {
   state.punchHistory = [
     {
       id: nextNumericId(state.punchHistory),
-      date: toDisplayDate(currentIsoDate()),
+      date: toDisplayDate(options.workDate || currentIsoDate()),
       time,
       action,
-      workType: state.attendance.workType,
+      workType: options.workType || state.attendance.workType,
       status
     },
     ...state.punchHistory
   ];
 }
-function handlePunch(action) {
-  const time = nowTime();
+function canPersistAttendance() {
+  return Boolean(
+    state.currentUser?.id &&
+    window.supabaseAuth?.isConfigured() &&
+    window.supabaseAuth?.getAttendanceByDate &&
+    window.supabaseAuth?.createAttendance &&
+    window.supabaseAuth?.updateAttendance
+  );
+}
+function findOpenBreakIndex(breaks) {
+  for (let index = breaks.length - 1; index >= 0; index -= 1) {
+    if (breaks[index]?.start && !breaks[index].end) return index;
+  }
+  return -1;
+}
+function applyLocalPunch(action, occurredAt) {
+  const time = nowTime(occurredAt);
+  const workDate = currentIsoDate(occurredAt);
   if (action === "clockIn") {
     state.attendance.status = "working";
+    state.attendance.workDate = workDate;
     state.attendance.clockIn = time;
     state.attendance.logs.push({ time, label: `出勤打刻（${state.attendance.workType}）` });
-    state.history[0] = { ...state.history[0], clockIn: time, work: "進行中", status: "working", workType: state.attendance.workType };
-    addPunchHistory("出勤", time, "working");
+    state.history[0] = { ...state.history[0], id: workDate, date: toDisplayDate(workDate), clockIn: toMinuteTime(time), work: "進行中", status: "working", workType: state.attendance.workType };
+    addPunchHistory("出勤", time, "working", { workDate });
   }
   if (action === "breakStart") {
     state.attendance.status = "break";
     state.attendance.breakCount += 1;
     state.attendance.logs.push({ time, label: "休憩開始" });
-    addPunchHistory("休憩開始", time, "break");
+    addPunchHistory("休憩開始", time, "break", { workDate: state.attendance.workDate || workDate });
   }
   if (action === "breakEnd") {
     state.attendance.status = "working";
     state.attendance.breakMinutes += 60;
     state.attendance.logs.push({ time, label: "休憩終了" });
-    addPunchHistory("休憩終了", time, "working");
+    addPunchHistory("休憩終了", time, "working", { workDate: state.attendance.workDate || workDate });
   }
   if (action === "clockOut") {
     state.attendance.status = "done";
     state.attendance.clockOut = time;
     state.attendance.logs.push({ time, label: "退勤打刻" });
-    state.history[0] = { ...state.history[0], clockOut: time, work: "8:00", overtime: "0:00", status: "normal" };
-    addPunchHistory("退勤", time, "done");
+    state.history[0] = { ...state.history[0], clockOut: toMinuteTime(time), work: "8:00", overtime: "0:00", status: "normal" };
+    addPunchHistory("退勤", time, "done", { workDate: state.attendance.workDate || workDate });
   }
+  updateCurrentEmployeeSummary();
+}
+async function fetchAttendanceForPunch(workDate) {
+  return window.supabaseAuth.getAttendanceByDate(state.currentUser.id, workDate);
+}
+async function persistClockIn(occurredAt) {
+  const workDate = currentIsoDate(occurredAt);
+  const timestamp = occurredAt.toISOString();
+  const existing = await fetchAttendanceForPunch(workDate);
+
+  if (existing?.clock_in) {
+    applyAttendanceRecord(existing);
+    setToast("本日の出勤は記録済みです。");
+    return;
+  }
+
+  if (existing) {
+    const updated = await window.supabaseAuth.updateAttendance(existing.id, {
+      work_type: state.attendance.workType,
+      clock_in: timestamp,
+      status: "working"
+    });
+    applyAttendanceRecord(updated);
+    addPunchHistory("出勤", utcToJapanTime(updated.clock_in), "working", {
+      workDate: updated.work_date,
+      workType: updated.work_type
+    });
+    setToast("出勤を記録しました。");
+    return;
+  }
+
+  try {
+    const created = await window.supabaseAuth.createAttendance({
+      user_id: state.currentUser.id,
+      work_date: workDate,
+      work_type: state.attendance.workType,
+      clock_in: timestamp,
+      break_minutes: 0,
+      breaks: [],
+      status: "working"
+    });
+    applyAttendanceRecord(created);
+    addPunchHistory("出勤", utcToJapanTime(created.clock_in), "working", {
+      workDate: created.work_date,
+      workType: created.work_type
+    });
+    setToast("出勤を記録しました。");
+  } catch (error) {
+    if (error?.code !== "23505") throw error;
+    const duplicate = await fetchAttendanceForPunch(workDate);
+    applyAttendanceRecord(duplicate);
+    setToast("本日の出勤は記録済みです。");
+  }
+}
+async function persistBreakStart(occurredAt) {
+  const workDate = state.attendance.workDate || currentIsoDate(occurredAt);
+  const record = await fetchAttendanceForPunch(workDate);
+  if (!record?.clock_in) {
+    applyAttendanceRecord(record);
+    setToast("先に出勤打刻をしてください。");
+    return;
+  }
+
+  const breaks = normalizeBreaks(record.breaks);
+  if (findOpenBreakIndex(breaks) >= 0) {
+    applyAttendanceRecord(record);
+    setToast("休憩開始は記録済みです。");
+    return;
+  }
+
+  breaks.push({ start: occurredAt.toISOString(), end: null });
+  const updated = await window.supabaseAuth.updateAttendance(record.id, {
+    status: "break",
+    breaks
+  });
+  applyAttendanceRecord(updated);
+  addPunchHistory("休憩開始", utcToJapanTime(occurredAt), "break", {
+    workDate: updated.work_date,
+    workType: updated.work_type
+  });
+  setToast("休憩開始を記録しました。");
+}
+async function persistBreakEnd(occurredAt) {
+  const workDate = state.attendance.workDate || currentIsoDate(occurredAt);
+  const record = await fetchAttendanceForPunch(workDate);
+  const breaks = normalizeBreaks(record?.breaks);
+  const openIndex = findOpenBreakIndex(breaks);
+
+  if (!record?.clock_in || openIndex < 0) {
+    applyAttendanceRecord(record);
+    setToast("終了対象の休憩がありません。");
+    return;
+  }
+
+  breaks[openIndex] = { ...breaks[openIndex], end: occurredAt.toISOString() };
+  const updated = await window.supabaseAuth.updateAttendance(record.id, {
+    status: "working",
+    breaks,
+    break_minutes: Math.round(totalBreakMinutes(breaks))
+  });
+  applyAttendanceRecord(updated);
+  addPunchHistory("休憩終了", utcToJapanTime(occurredAt), "working", {
+    workDate: updated.work_date,
+    workType: updated.work_type
+  });
+  setToast("休憩終了を記録しました。");
+}
+async function persistClockOut(occurredAt) {
+  const workDate = state.attendance.workDate || currentIsoDate(occurredAt);
+  const record = await fetchAttendanceForPunch(workDate);
+
+  if (!record?.clock_in) {
+    applyAttendanceRecord(record);
+    setToast("出勤レコードがないため退勤を記録できません。");
+    return;
+  }
+
+  if (record.clock_out) {
+    applyAttendanceRecord(record);
+    setToast("本日の退勤は記録済みです。");
+    return;
+  }
+
+  const updated = await window.supabaseAuth.updateAttendance(record.id, {
+    clock_out: occurredAt.toISOString(),
+    status: "normal",
+    break_minutes: recordBreakMinutes(record),
+    breaks: normalizeBreaks(record.breaks)
+  });
+  applyAttendanceRecord(updated);
+  addPunchHistory("退勤", utcToJapanTime(updated.clock_out), "done", {
+    workDate: updated.work_date,
+    workType: updated.work_type
+  });
+  setToast("退勤を記録しました。");
+}
+function attendanceErrorMessage(error) {
+  if (error?.code === "23505") return "本日の勤怠レコードは既に存在します。";
+  return error?.message || "勤怠記録に失敗しました。";
+}
+async function handlePunch(action) {
+  if (state.punchPending) return;
+  const occurredAt = new Date();
+
+  if (!canPersistAttendance()) {
+    applyLocalPunch(action, occurredAt);
+    render();
+    return;
+  }
+
+  state.punchPending = true;
   render();
+
+  try {
+    if (action === "clockIn") await persistClockIn(occurredAt);
+    if (action === "breakStart") await persistBreakStart(occurredAt);
+    if (action === "breakEnd") await persistBreakEnd(occurredAt);
+    if (action === "clockOut") await persistClockOut(occurredAt);
+  } catch (error) {
+    console.error(error);
+    setToast(attendanceErrorMessage(error));
+  } finally {
+    state.punchPending = false;
+    render();
+  }
 }
 function submitCorrection(id) {
   const reason = document.querySelector("#edit-reason").value.trim();
@@ -827,20 +1259,107 @@ function deleteDailyReport(id) {
   if (state.reportEditingId === id) state.reportEditingId = null;
   setToast("日報を削除しました。");
 }
-document.addEventListener("click", (event) => {
+function authErrorMessage(error) {
+  const message = error?.message || "";
+  if (message.includes("email rate limit exceeded")) {
+    return "確認メールの送信上限に達しています。SupabaseのAuth設定でメール確認をOFFにするか、時間を置いてから再度登録してください。";
+  }
+  if (message.includes("User already registered")) {
+    return "このメールアドレスは既に登録されています。ログインしてください。";
+  }
+  if (message.includes("Password should be at least 6 characters")) {
+    return "パスワードは6文字以上で入力してください。";
+  }
+  return error?.message || "認証処理に失敗しました。";
+}
+function validateEmailPassword(email, password) {
+  if (!email || !password) {
+    setToast("メールアドレスとパスワードを入力してください。");
+    return false;
+  }
+  if (password.length < 6) {
+    setToast("パスワードは6文字以上で入力してください。");
+    return false;
+  }
+  return true;
+}
+async function login() {
+  const email = document.querySelector("#login-email").value.trim();
+  const password = document.querySelector("#login-password").value.trim();
+  if (!validateEmailPassword(email, password)) return;
+  setAuthPending(true);
+  state.authError = "";
+  try {
+    const profile = await window.supabaseAuth.signIn(email, password);
+    applyAuthProfile(profile);
+    await loadTodayAttendanceSafely();
+    setPath("/dashboard");
+    render();
+  } catch (error) {
+    state.authError = authErrorMessage(error);
+    render();
+  } finally {
+    setAuthPending(false);
+    render();
+  }
+}
+async function signup() {
+  const email = document.querySelector("#signup-email").value.trim();
+  const password = document.querySelector("#signup-password").value.trim();
+  if (!validateEmailPassword(email, password)) return;
+  setAuthPending(true);
+  state.authError = "";
+  try {
+    const result = await window.supabaseAuth.signUp(email, password);
+
+    if (!result.profile) {
+      state.authMode = "login";
+      state.toast = result.needsConfirmation
+        ? "確認メールを送信しました。メール認証後にログインしてください。"
+        : "新規登録を受け付けました。ログインしてください。";
+      render();
+      return;
+    }
+
+    applyAuthProfile(result.profile);
+    await loadTodayAttendanceSafely();
+    setPath("/dashboard");
+    render();
+  } catch (error) {
+    state.authError = authErrorMessage(error);
+    render();
+  } finally {
+    setAuthPending(false);
+    render();
+  }
+}
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-auth-form]");
+  if (!form) return;
+  event.preventDefault();
+  if (form.dataset.authForm === "signup") {
+    await signup();
+    return;
+  }
+  await login();
+});
+document.addEventListener("click", async (event) => {
   const target = event.target.closest("button, [data-action]");
   if (!target) return;
-  const loginRole = target.dataset.loginRole;
-  if (loginRole) {
-    state.loginRole = loginRole;
+  const authMode = target.dataset.authMode;
+  if (authMode) {
+    state.authMode = authMode;
+    state.authError = "";
+    state.toast = "";
     render();
     return;
   }
   if (target.dataset.action === "login") {
-    state.role = state.loginRole;
-    state.isLoggedIn = true;
-    setPath("/dashboard");
-    render();
+    await login();
+    return;
+  }
+  if (target.dataset.action === "signup") {
+    await signup();
     return;
   }
   const nav = target.dataset.nav;
@@ -851,7 +1370,7 @@ document.addEventListener("click", (event) => {
   }
   const punch = target.dataset.punch;
   if (punch) {
-    handlePunch(punch);
+    await handlePunch(punch);
     return;
   }
   const editId = target.dataset.edit;
@@ -903,10 +1422,13 @@ document.addEventListener("click", (event) => {
     render();
   }
   if (target.dataset.action === "logout") {
-    state.isLoggedIn = false;
-    state.sidebarOpen = false;
-    state.loginRole = state.role;
-    setPath("/dashboard");
+    try {
+      await window.supabaseAuth.signOut();
+    } catch (error) {
+      state.authError = authErrorMessage(error);
+    }
+    clearAuthState();
+    setPath("/login");
     render();
     return;
   }
@@ -956,4 +1478,50 @@ window.setInterval(() => {
 if (!window.location.hash) {
   window.location.hash = "/dashboard";
 }
-render();
+async function initializeAuth() {
+  render();
+
+  if (!window.supabaseAuth?.isConfigured()) {
+    state.authReady = true;
+    state.authError = "Supabase設定が未完了です。supabase-config.js にanon keyを設定してください。";
+    render();
+    return;
+  }
+
+  try {
+    const profile = await window.supabaseAuth.getSessionProfile();
+    if (profile) {
+      applyAuthProfile(profile);
+      await loadTodayAttendanceSafely();
+    }
+  } catch (error) {
+    state.authError = authErrorMessage(error);
+  } finally {
+    state.authReady = true;
+    render();
+  }
+
+  window.supabaseAuth.onAuthStateChange(async (event, session) => {
+    if (event === "SIGNED_OUT") {
+      clearAuthState();
+      setPath("/login");
+      render();
+      return;
+    }
+
+    if (!session?.user) return;
+
+    try {
+      const profile = await window.supabaseAuth.getSessionProfile();
+      if (profile) {
+        applyAuthProfile(profile);
+        await loadTodayAttendanceSafely();
+        render();
+      }
+    } catch (error) {
+      state.authError = authErrorMessage(error);
+      render();
+    }
+  });
+}
+initializeAuth();

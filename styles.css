@@ -289,6 +289,10 @@ button {
   color: var(--muted);
   font-size: 13px;
 }
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
 .login-role-toggle,
 .login-button {
   width: 100%;
@@ -949,17 +953,60 @@ tr:last-child td {
   .grid.cols-3,
   .grid.cols-4,
   .dashboard-stats,
-  .kpi-grid,
   .status-hero,
   .form-grid {
     grid-template-columns: 1fr;
   }
   .dashboard-kpi-header {
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+  }
+  .dashboard-kpi-header h1 {
+    font-size: 22px;
+  }
+  .dashboard-kpi-header p {
+    margin-top: 4px;
+    font-size: 12px;
   }
   .dashboard-kpi-actions {
-    width: 100%;
-    justify-content: flex-start;
+    width: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .dashboard-kpi-actions .button {
+    min-height: 36px;
+    padding: 0 10px;
+  }
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .kpi-card {
+    min-height: 128px;
+    gap: 12px;
+    padding: 14px;
+  }
+  .kpi-label {
+    font-size: 12px;
+  }
+  .kpi-icon {
+    width: 30px;
+    height: 30px;
+  }
+  .kpi-value {
+    gap: 6px;
+  }
+  .kpi-value strong {
+    font-size: 34px;
+  }
+  .kpi-value span {
+    font-size: 14px;
+  }
+  .kpi-note {
+    font-size: 12px;
   }
   .calendar-grid {
     grid-template-columns: repeat(7, minmax(42px, 1fr));
@@ -1054,6 +1101,31 @@ tr:last-child td {
   }
   .role-toggle button {
     min-width: 0;
+  }
+  .dashboard-kpi-section {
+    gap: 14px;
+  }
+  .dashboard-kpi-header h1 {
+    font-size: 20px;
+  }
+  .dashboard-kpi-actions .button {
+    min-height: 34px;
+    padding: 0 8px;
+    gap: 5px;
+  }
+  .kpi-grid {
+    gap: 8px;
+  }
+  .kpi-card {
+    min-height: 118px;
+    padding: 12px;
+  }
+  .kpi-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .kpi-value strong {
+    font-size: 30px;
   }
   .actions-grid {
     grid-template-columns: 1fr;

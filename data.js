@@ -86,18 +86,27 @@ const statusClasses = {
 };
 const attendanceTypes = ["出社", "リモート", "直行", "直帰", "フレックス"];
 const state = {
+  authReady: false,
+  authError: "",
+  authPending: false,
   isLoggedIn: false,
+  authMode: "login",
   loginRole: "member",
   role: "member",
+  currentUser: null,
   path: "/dashboard",
   sidebarOpen: false,
+  punchPending: false,
   attendance: {
+    id: null,
+    workDate: "",
     status: "not_started",
     workType: "出社",
     clockIn: "",
     clockOut: "",
     breakCount: 0,
     breakMinutes: 0,
+    breaks: [],
     logs: []
   },
   punchHistory: [
