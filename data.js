@@ -29,6 +29,7 @@ const navItems = [
   { path: "/daily-report", label: "日報", icon: "approvals", roles: ["admin", "member"] },
   { path: "/monthly-report", label: "月次レポート", icon: "report", roles: ["admin", "member"] },
   { section: "admin" },
+  { path: "/admin/shifts", label: "シフト管理", icon: "approvals", roles: ["admin"] },
   { path: "/admin/approvals", label: "承認管理", icon: "approvals", roles: ["admin"] },
   { path: "/admin/member-attendance", label: "メンバー勤怠", icon: "calendar", roles: ["admin"] },
   { path: "/admin/monthly-close", label: "月次締め", icon: "settings", roles: ["admin"] },
@@ -45,6 +46,7 @@ const pageMeta = {
   "/calendar": ["カレンダー", "シフト、休暇、締め日を月表示で確認"],
   "/daily-report": ["日報", "本日の業務内容と明日の予定"],
   "/monthly-report": ["月次レポート", "個人の勤務時間と申請状況の集計"],
+  "/admin/shifts": ["シフト管理", "全ユーザーのシフト申請を承認・却下・保留"],
   "/admin/approvals": ["承認管理", "申請の承認と却下"],
   "/admin/member-attendance": ["メンバー勤怠", "メンバー別の出退勤状況"],
   "/admin/monthly-close": ["月次締め", "月末の勤怠確定と差戻し"],
@@ -63,6 +65,7 @@ const statusLabels = {
   shift_pending: "申請中",
   shift_approved: "承認済み",
   shift_rejected: "却下",
+  shift_on_hold: "保留",
   absent: "欠勤",
   paid_leave: "有給",
   holiday: "休日"
@@ -74,12 +77,13 @@ const statusClasses = {
   break: "warn",
   not_started: "neutral",
   missing_clock_out: "warn",
-  correction_pending: "info",
-  correction_approved: "ok",
+  correction_pending: "ok",
+  correction_approved: "info",
   correction_rejected: "danger",
-  shift_pending: "info",
-  shift_approved: "ok",
+  shift_pending: "ok",
+  shift_approved: "info",
   shift_rejected: "danger",
+  shift_on_hold: "warn",
   absent: "danger",
   paid_leave: "info",
   holiday: "neutral"
@@ -96,6 +100,7 @@ const state = {
   currentUser: null,
   path: "/dashboard",
   sidebarOpen: false,
+  notifications: [],
   punchPending: false,
   attendance: {
     id: null,
@@ -132,6 +137,8 @@ const state = {
     { id: 2, requestDate: "2026/07/15", shift: "遅番", time: "11:00 - 20:00", reason: "夕方の問い合わせ対応当番", submittedAt: "2026/07/05", status: "shift_pending" },
     { id: 3, requestDate: "2026/07/18", shift: "休暇", time: "-", reason: "私用のため", submittedAt: "2026/07/04", status: "shift_rejected" }
   ],
+  adminShifts: [],
+  adminShiftPendingId: null,
   leaveSummary: {
     annualGranted: 20,
     carriedOver: 2,

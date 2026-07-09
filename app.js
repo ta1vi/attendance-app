@@ -52,6 +52,7 @@ function applyAuthProfile(profile) {
   state.currentUser = user;
   state.isLoggedIn = true;
   state.authError = "";
+  loadNotifications();
   if (!state.employees.some((employee) => employee.name === user.name)) {
     state.employees = [
       { name: user.name, department: user.department || "-", role: user.role, status: "未出勤", today: "-", month: "0:00" },
@@ -66,6 +67,7 @@ function clearAuthState() {
   state.role = "member";
   state.loginRole = "member";
   state.currentUser = null;
+  state.notifications = [];
 }
 function setAuthPending(pending) {
   state.authPending = pending;
@@ -262,6 +264,98 @@ async function loadTodayAttendanceSafely() {
     console.error(error);
     state.toast = "本日の勤怠情報を取得できませんでした。";
     return null;
+  }
+}
+function shiftStatusToApp(status) {
+  if (status === "approved") return "shift_approved";
+  if (status === "rejected") return "shift_rejected";
+  if (status === "on_hold") return "shift_on_hold";
+  return "shift_pending";
+}
+function formatShiftTime(shift) {
+  const start = shift.start_time ? shift.start_time.slice(0, 5) : "";
+  const end = shift.end_time ? shift.end_time.slice(0, 5) : "";
+  if (!start && !end) return "-";
+  return `${start || "-"} - ${end || "-"}`;
+}
+function shiftRowToItem(shift) {
+  return {
+    id: shift.id,
+    requestDate: toDisplayDate(shift.request_date),
+    shift: shift.shift_type,
+    time: formatShiftTime(shift),
+    reason: shift.reason,
+    submittedAt: shift.submitted_at ? toDisplayDate(currentIsoDate(shift.submitted_at)) : "",
+    status: shiftStatusToApp(shift.status)
+  };
+}
+function canPersistShifts() {
+  return Boolean(
+    state.currentUser?.id &&
+    window.supabaseAuth?.isConfigured() &&
+    window.supabaseAuth?.listShifts &&
+    window.supabaseAuth?.createShift
+  );
+}
+async function loadShifts() {
+  if (!canPersistShifts()) return;
+  const rows = await window.supabaseAuth.listShifts();
+  notifyShiftStatusChanges(rows);
+  state.shiftRequests = rows.map(shiftRowToItem);
+}
+async function loadShiftsSafely() {
+  try {
+    await loadShifts();
+  } catch (error) {
+    console.error(error);
+    state.toast = "シフト申請の取得に失敗しました。";
+  }
+}
+function adminShiftRowToItem(shift) {
+  const applicant = shift.applicant || {};
+  return {
+    id: shift.id,
+    applicantName: applicant.full_name || applicant.email || "不明なユーザー",
+    department: applicant.department || "-",
+    requestDate: toDisplayDate(shift.request_date),
+    shift: shift.shift_type,
+    time: formatShiftTime(shift),
+    reason: shift.reason,
+    submittedAt: shift.submitted_at ? toDisplayDate(currentIsoDate(shift.submitted_at)) : "",
+    status: shiftStatusToApp(shift.status)
+  };
+}
+function canManageShifts() {
+  return Boolean(
+    state.role === "admin" &&
+    state.currentUser?.id &&
+    window.supabaseAuth?.isConfigured() &&
+    window.supabaseAuth?.listShiftsForAdmin &&
+    window.supabaseAuth?.updateShift
+  );
+}
+async function loadAdminShifts() {
+  if (!canManageShifts()) return;
+  const rows = await window.supabaseAuth.listShiftsForAdmin();
+  state.adminShifts = rows.map(adminShiftRowToItem);
+}
+async function loadAdminShiftsSafely() {
+  try {
+    await loadAdminShifts();
+  } catch (error) {
+    console.error(error);
+    state.toast = "シフト申請の取得に失敗しました。";
+  }
+}
+async function loadPageDataSafely() {
+  if (!state.isLoggedIn) return;
+  if (state.path === "/shift-request" || state.path === "/dashboard") {
+    await loadShiftsSafely();
+    render();
+  }
+  if (state.path === "/admin/shifts") {
+    await loadAdminShiftsSafely();
+    render();
   }
 }
 function setPath(path) {
@@ -477,6 +571,7 @@ function renderPage() {
   if (state.path === "/calendar") return renderCalendar();
   if (state.path === "/daily-report") return renderDailyReport();
   if (state.path === "/monthly-report") return renderMonthlyReport();
+  if (state.path === "/admin/shifts") return renderAdminShifts();
   if (state.path === "/admin/approvals") return renderApprovals();
   if (state.path === "/admin/member-attendance") return renderCompanyAttendance();
   if (state.path === "/admin/monthly-close") return renderMonthlyClose();
@@ -559,6 +654,7 @@ function renderDashboard() {
         </div>
         ${state.role === "admin" ? `
           <div class="employee-list">
+            ${renderNotificationItems()}
             <div class="item">
               <div class="item-row">
                 <div><div class="item-title">本日未打刻者</div><div class="item-meta">出勤打刻がまだありません</div></div>
@@ -574,6 +670,7 @@ function renderDashboard() {
           </div>
         ` : `
           <div class="employee-list">
+            ${renderNotificationItems()}
             <div class="item">
               <div class="item-title">7月の締め処理</div>
               <div class="item-meta">月末までに未打刻日の修正申請を提出してください。</div>
@@ -873,6 +970,100 @@ function renderCompanyAttendance() {
     </section>
   `;
 }
+function renderAdminShifts() {
+  const openStatuses = ["shift_pending", "shift_on_hold"];
+  const pending = state.adminShifts.filter((item) => openStatuses.includes(item.status));
+  const processed = state.adminShifts.filter((item) => !openStatuses.includes(item.status));
+  const onHoldCount = pending.filter((item) => item.status === "shift_on_hold").length;
+  return `
+    <section class="grid cols-2">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>未処理のシフト申請</h2>
+            <p>承認・却下・保留を選択すると証跡が残ります</p>
+          </div>
+          <div class="field-row">
+            ${onHoldCount ? badge("shift_on_hold", `保留 ${onHoldCount}件`) : ""}
+            ${badge("shift_pending", `${pending.length}件`)}
+          </div>
+        </div>
+        <div class="approval-list">
+          ${pending.length ? pending.map(renderAdminShiftItem).join("") : '<div class="empty">未処理のシフト申請はありません</div>'}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>処理済み</h2>
+            <p>承認・却下済みの申請</p>
+          </div>
+          ${badge("normal", `${processed.length}件`)}
+        </div>
+        <div class="approval-list">
+          ${processed.length ? processed.map(renderAdminShiftItem).join("") : '<div class="empty">処理済みの申請はありません</div>'}
+        </div>
+      </div>
+    </section>
+  `;
+}
+function renderAdminShiftItem(item) {
+  const pendingThis = state.adminShiftPendingId === item.id;
+  return `
+    <article class="item">
+      <div class="item-row">
+        <div>
+          <div class="item-title">${escapeHtml(item.applicantName)} / ${escapeHtml(item.requestDate)}</div>
+          <div class="item-meta">${escapeHtml(item.department)}・${escapeHtml(item.shift)}・${escapeHtml(item.time)}</div>
+        </div>
+        ${badge(item.status)}
+      </div>
+      <div class="item-meta">${escapeHtml(item.reason)}</div>
+      <div class="item-meta">申請日: ${escapeHtml(item.submittedAt)}</div>
+      ${item.status === "shift_pending" || item.status === "shift_on_hold" ? `
+        <div class="field-row">
+          <button class="button approve" data-shift-decision="approved" data-shift-id="${item.id}" ${pendingThis ? "disabled" : ""}>${icon("check")}承認</button>
+          <button class="button reject" data-shift-decision="rejected" data-shift-id="${item.id}" ${pendingThis ? "disabled" : ""}>${icon("close")}却下</button>
+          ${item.status === "shift_pending" ? `<button class="button hold" data-shift-decision="on_hold" data-shift-id="${item.id}" ${pendingThis ? "disabled" : ""}>${icon("clock")}保留</button>` : ""}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+const shiftDecisionLabels = { approved: "承認", rejected: "却下", on_hold: "保留に" };
+const shiftDecisionStatuses = { approved: "shift_approved", rejected: "shift_rejected", on_hold: "shift_on_hold" };
+async function decideAdminShift(id, decision) {
+  const item = state.adminShifts.find((shift) => shift.id === id);
+  const decidable = item && (item.status === "shift_pending" || item.status === "shift_on_hold");
+  if (!decidable || item.status === shiftDecisionStatuses[decision]) return;
+  const label = shiftDecisionLabels[decision];
+  if (!label) return;
+  if (!window.confirm(`本当に${label}しますか？`)) return;
+
+  if (!canManageShifts()) {
+    state.adminShifts = state.adminShifts.map((shift) => shift.id === id ? { ...shift, status: shiftDecisionStatuses[decision] } : shift);
+    setToast(`シフト申請を${label}しました。`);
+    return;
+  }
+
+  state.adminShiftPendingId = id;
+  render();
+  try {
+    await window.supabaseAuth.updateShift(id, {
+      status: decision,
+      reviewed_by: state.currentUser.id,
+      reviewed_at: new Date().toISOString()
+    });
+    await loadAdminShifts();
+    setToast(`シフト申請を${label}しました。`);
+  } catch (error) {
+    console.error(error);
+    setToast(error?.message || "シフト申請の更新に失敗しました。");
+  } finally {
+    state.adminShiftPendingId = null;
+    render();
+  }
+}
 function renderApprovals() {
   const pending = state.approvals.filter((item) => item.status === "pending");
   const closed = state.approvals.filter((item) => item.status !== "pending");
@@ -918,8 +1109,8 @@ function renderApprovalItem(item) {
       <div class="item-meta">${item.reason}</div>
       ${item.status === "pending" ? `
         <div class="field-row">
-          <button class="button primary" data-approval="${item.id}" data-decision="approved">${icon("check")}承認</button>
-          <button class="button danger" data-approval="${item.id}" data-decision="rejected">${icon("close")}却下</button>
+          <button class="button approve" data-approval="${item.id}" data-decision="approved">${icon("check")}承認</button>
+          <button class="button reject" data-approval="${item.id}" data-decision="rejected">${icon("close")}却下</button>
         </div>
       ` : ""}
     </article>
@@ -1159,16 +1350,33 @@ function submitCorrection(id) {
   setToast("修正申請を提出しました。");
   setPath("/clock-correction");
 }
-function submitShiftRequest() {
-  const requestDate = document.querySelector("#shift-date").value;
-  const shift = document.querySelector("#shift-type").value;
-  const start = document.querySelector("#shift-start").value;
-  const end = document.querySelector("#shift-end").value;
-  const reason = document.querySelector("#shift-reason").value.trim();
-  if (!requestDate || !shift || !reason) {
-    setToast("希望日、シフト区分、申請理由を入力してください。");
+function shiftPendingToast() {
+  const pendingCount = state.shiftRequests.filter((item) => item.status === "shift_pending").length;
+  pushNotification(`シフト申請を提出しました。（${pendingCount}件承認待ちです）`);
+}
+async function cancelShiftRequest(id) {
+  const targetItem = state.shiftRequests.find((item) => String(item.id) === String(id));
+  if (!targetItem) return;
+  if (targetItem.status !== "shift_pending") {
+    setToast("申請中のシフトのみキャンセルできます。");
     return;
   }
+  if (!window.confirm(`シフト申請をキャンセルしますか？（希望日 ${targetItem.requestDate}）`)) return;
+  if (canPersistShifts() && window.supabaseAuth?.deleteShift) {
+    try {
+      await window.supabaseAuth.deleteShift(targetItem.id);
+      await loadShifts();
+    } catch (error) {
+      console.error(error);
+      setToast(error?.message || "シフト申請のキャンセルに失敗しました。");
+      return;
+    }
+  } else {
+    state.shiftRequests = state.shiftRequests.filter((item) => String(item.id) !== String(id));
+  }
+  pushNotification(`シフト申請（希望日 ${targetItem.requestDate}）をキャンセルしました。`);
+}
+function addLocalShiftRequest({ requestDate, shift, start, end, reason }) {
   const time = shift === "休暇" ? "-" : `${start || "-"} - ${end || "-"}`;
   state.shiftRequests = [
     {
@@ -1182,7 +1390,44 @@ function submitShiftRequest() {
     },
     ...state.shiftRequests
   ];
-  setToast("シフト申請を提出しました。");
+}
+async function submitShiftRequest() {
+  const requestDate = document.querySelector("#shift-date").value;
+  const shift = document.querySelector("#shift-type").value;
+  const start = document.querySelector("#shift-start").value;
+  const end = document.querySelector("#shift-end").value;
+  const reason = document.querySelector("#shift-reason").value.trim();
+  if (!requestDate || !shift || !reason) {
+    setToast("希望日、シフト区分、申請理由を入力してください。");
+    return;
+  }
+  if (!window.confirm(`シフト申請を提出しますか？（希望日 ${toDisplayDate(requestDate)}）`)) return;
+
+  if (!canPersistShifts()) {
+    addLocalShiftRequest({ requestDate, shift, start, end, reason });
+    shiftPendingToast();
+    return;
+  }
+
+  const useTimes = shift !== "休暇";
+  const payload = {
+    user_id: state.currentUser.id,
+    request_date: requestDate,
+    shift_type: shift,
+    start_time: useTimes && start ? start : null,
+    end_time: useTimes && end ? end : null,
+    reason,
+    status: "pending"
+  };
+
+  try {
+    await window.supabaseAuth.createShift(payload);
+    await loadShifts();
+    shiftPendingToast();
+  } catch (error) {
+    console.error(error);
+    setToast(error?.message || "シフト申請の保存に失敗しました。");
+  }
 }
 function submitLeaveRequest() {
   const requestDate = document.querySelector("#leave-date").value;
@@ -1385,7 +1630,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if ("submitShift" in target.dataset) {
-    submitShiftRequest();
+    await submitShiftRequest();
+    return;
+  }
+  const cancelShiftId = target.dataset.cancelShift;
+  if (cancelShiftId) {
+    await cancelShiftRequest(cancelShiftId);
     return;
   }
   if ("saveReport" in target.dataset) {
@@ -1406,6 +1656,11 @@ document.addEventListener("click", async (event) => {
   if ("cancelReport" in target.dataset) {
     state.reportEditingId = null;
     render();
+    return;
+  }
+  const shiftDecision = target.dataset.shiftDecision;
+  if (shiftDecision) {
+    await decideAdminShift(target.dataset.shiftId, shiftDecision);
     return;
   }
   const approvalId = target.dataset.approval;
@@ -1471,7 +1726,10 @@ document.addEventListener("change", (event) => {
     render();
   }
 });
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", async () => {
+  render();
+  await loadPageDataSafely();
+});
 window.setInterval(() => {
   const clock = document.querySelector("[data-clock]");
   if (clock) clock.textContent = nowTime();
@@ -1502,6 +1760,8 @@ async function initializeAuth() {
     render();
   }
 
+  await loadPageDataSafely();
+
   window.supabaseAuth.onAuthStateChange(async (event, session) => {
     if (event === "SIGNED_OUT") {
       clearAuthState();
@@ -1518,6 +1778,7 @@ async function initializeAuth() {
         applyAuthProfile(profile);
         await loadTodayAttendanceSafely();
         render();
+        await loadPageDataSafely();
       }
     } catch (error) {
       state.authError = authErrorMessage(error);

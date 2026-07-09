@@ -171,6 +171,83 @@
     return data;
   }
 
+  const shiftColumns = [
+    "id",
+    "user_id",
+    "request_date",
+    "shift_type",
+    "start_time",
+    "end_time",
+    "reason",
+    "status",
+    "reviewed_by",
+    "reviewed_at",
+    "submitted_at",
+    "created_at",
+    "updated_at"
+  ].join(",");
+
+  async function listShifts() {
+    if (!client) return [];
+    // RLS により member は自分のシフトのみ、admin は全員のシフトが返る
+    const { data, error } = await client
+      .from("shifts")
+      .select(shiftColumns)
+      .order("request_date", { ascending: false })
+      .order("submitted_at", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  }
+
+  // 管理者用: 申請者のプロフィールを結合して全シフトを取得（RLS で admin は全件取得可）
+  async function listShiftsForAdmin() {
+    if (!client) return [];
+    const { data, error } = await client
+      .from("shifts")
+      .select(`${shiftColumns},applicant:profiles!shifts_user_id_fkey(id,full_name,email,department)`)
+      .order("request_date", { ascending: false })
+      .order("submitted_at", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function createShift(payload) {
+    if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
+    const { data, error } = await client
+      .from("shifts")
+      .insert(payload)
+      .select(shiftColumns)
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async function updateShift(id, payload) {
+    if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
+    const { data, error } = await client
+      .from("shifts")
+      .update(payload)
+      .eq("id", id)
+      .select(shiftColumns)
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async function deleteShift(id) {
+    if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
+    const { error } = await client
+      .from("shifts")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+  }
+
   function onAuthStateChange(callback) {
     if (!client) return { unsubscribe() {} };
     const { data } = client.auth.onAuthStateChange(callback);
@@ -188,6 +265,11 @@
     getAttendanceByDate,
     createAttendance,
     updateAttendance,
+    listShifts,
+    listShiftsForAdmin,
+    createShift,
+    updateShift,
+    deleteShift,
     onAuthStateChange
   };
 })();

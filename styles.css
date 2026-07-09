@@ -506,8 +506,8 @@ button {
   border-radius: 8px;
   color: #ffffff;
   background:
-    linear-gradient(135deg, rgba(15, 118, 110, 0.96), rgba(37, 99, 235, 0.82)),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.12) 0 1px, transparent 1px 22px);
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 500'%3E%3Cg fill='%23ffffff' fill-opacity='0.18'%3E%3Cpath d='M75 175 L60 140 L95 95 L150 70 L230 55 L310 60 L345 85 L310 105 L330 120 L295 140 L270 165 L255 200 L235 230 L230 260 L250 280 L235 292 L205 265 L175 240 L140 215 L105 195 Z'/%3E%3Cpath d='M355 40 L410 30 L440 55 L415 90 L370 95 L350 65 Z'/%3E%3Cpath d='M260 300 L300 288 L335 315 L330 360 L308 415 L288 458 L272 440 L258 385 L248 335 Z'/%3E%3Cpath d='M475 120 L500 85 L545 68 L590 78 L605 100 L580 118 L545 132 L515 150 L487 148 Z'/%3E%3Cpath d='M470 170 L525 152 L580 168 L607 205 L592 255 L565 308 L540 355 L518 360 L498 315 L473 262 L458 212 Z'/%3E%3Cpath d='M620 300 L635 285 L645 315 L628 335 Z'/%3E%3Cpath d='M610 105 L650 62 L730 45 L820 55 L890 80 L925 115 L900 150 L855 185 L820 170 L790 205 L760 245 L738 285 L716 252 L688 220 L652 192 L625 155 Z'/%3E%3Cpath d='M690 225 L725 215 L735 255 L712 292 L695 260 Z'/%3E%3Cpath d='M775 295 L815 282 L850 295 L830 315 L795 310 Z'/%3E%3Cpath d='M905 165 L925 145 L938 168 L918 190 Z'/%3E%3Cpath d='M818 350 L872 338 L912 362 L900 402 L852 415 L820 390 Z'/%3E%3Cpath d='M930 425 L945 412 L952 435 L935 448 Z'/%3E%3C/g%3E%3C/svg%3E") center / auto 100% no-repeat,
+    linear-gradient(135deg, rgba(15, 118, 110, 0.96), rgba(37, 99, 235, 0.82));
 }
 .clock-status {
   width: fit-content;
@@ -613,6 +613,21 @@ button {
   color: var(--danger);
   border-color: #fec8c0;
   background: var(--danger-soft);
+}
+.button.approve,
+.action-button.approve {
+  color: #ffffff;
+  background: var(--accent);
+}
+.button.reject,
+.action-button.reject {
+  color: #ffffff;
+  background: var(--danger);
+}
+.button.hold,
+.action-button.hold {
+  color: #ffffff;
+  background: var(--warn);
 }
 .button:disabled,
 .action-button:disabled {

@@ -68,6 +68,7 @@ function renderShiftRequestHistory() {
             <th>理由</th>
             <th>申請日</th>
             <th>状態</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -79,6 +80,7 @@ function renderShiftRequestHistory() {
               <td>${escapeHtml(item.reason)}</td>
               <td>${escapeHtml(item.submittedAt)}</td>
               <td>${badge(item.status)}</td>
+              <td>${item.status === "shift_pending" ? `<button class="button danger compact" data-cancel-shift="${escapeHtml(String(item.id))}">キャンセル</button>` : ""}</td>
             </tr>
           `).join("")}
         </tbody>
