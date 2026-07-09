@@ -349,8 +349,9 @@ function renderAuthLoading() {
 }
 function renderLogin() {
   const isSignup = state.authMode === "signup";
+  const initMessage = window.supabaseAuth?.initErrorMessage?.() || "supabase-config.js に anon key を設定してください。";
   const configNotice = !window.supabaseAuth?.isConfigured()
-    ? '<div class="notice">supabase-config.js に anon key を設定してください。</div>'
+    ? `<div class="notice">${escapeHtml(initMessage)}</div>`
     : "";
   const submitLabel = state.authPending
     ? isSignup ? "登録中" : "ログイン中"

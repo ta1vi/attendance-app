@@ -5,9 +5,22 @@
     config.anonKey &&
     config.anonKey !== "YOUR_SUPABASE_ANON_KEY"
   );
-  const client = hasConfig && window.supabase
+  const hasLibrary = Boolean(window.supabase);
+  const client = hasConfig && hasLibrary
     ? window.supabase.createClient(config.url, config.anonKey)
     : null;
+
+  function initIssue() {
+    if (!hasConfig) return "config";
+    if (!hasLibrary) return "library";
+    return null;
+  }
+
+  function initErrorMessage() {
+    if (!hasConfig) return "supabase-config.js にSupabaseのURLとPublishable key（anon key）を設定してください。";
+    if (!hasLibrary) return "supabase-jsライブラリを読み込めませんでした。プロジェクト直下で npm install を実行し、ページを再読み込みしてください。";
+    return "";
+  }
 
   function normalizeRole(role) {
     return role === "admin" ? "admin" : "member";
@@ -63,7 +76,7 @@
   }
 
   async function signIn(email, password) {
-    if (!client) throw new Error("SupabaseのURLまたはanon keyが未設定です。");
+    if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
     const { data, error } = await client.auth.signInWithPassword({
       email: normalizeEmail(email),
       password
@@ -74,7 +87,7 @@
   }
 
   async function signUp(email, password) {
-    if (!client) throw new Error("SupabaseのURLまたはanon keyが未設定です。");
+    if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
     const { data, error } = await client.auth.signUp({
       email: normalizeEmail(email),
       password,
@@ -134,7 +147,7 @@
   }
 
   async function createAttendance(payload) {
-    if (!client) throw new Error("SupabaseのURLまたはanon keyが未設定です。");
+    if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
     const { data, error } = await client
       .from("attendances")
       .insert(payload)
@@ -146,7 +159,7 @@
   }
 
   async function updateAttendance(id, payload) {
-    if (!client) throw new Error("SupabaseのURLまたはanon keyが未設定です。");
+    if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
     const { data, error } = await client
       .from("attendances")
       .update(payload)
@@ -166,6 +179,8 @@
 
   window.supabaseAuth = {
     isConfigured: () => Boolean(client),
+    initIssue,
+    initErrorMessage,
     getSessionProfile,
     signIn,
     signUp,

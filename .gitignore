@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Supabase local temp
+supabase/.temp/
+
+# Session memory (local only)
+CLAUDE.local.md
+
+# OS files
+.DS_Store
