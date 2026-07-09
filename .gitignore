@@ -10,5 +10,10 @@ supabase/.temp/
 # Session memory (local only)
 CLAUDE.local.md
 
+# Env files (never commit)
+.env
+.env.local
+.env.*.local
+
 # OS files
 .DS_Store
