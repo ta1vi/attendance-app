@@ -16,7 +16,9 @@ const icons = {
   trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>',
   download: '<svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>',
-  close: '<svg viewBox="0 0 24 24"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>'
+  close: '<svg viewBox="0 0 24 24"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>',
+  chevronLeft: '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>',
+  chevronRight: '<svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>'
 };
 const navItems = [
   { path: "/dashboard", label: "ダッシュボード", icon: "dashboard", roles: ["admin", "member"] },
@@ -139,6 +141,10 @@ const state = {
   ],
   adminShifts: [],
   adminShiftPendingId: null,
+  calendar: null,
+  calendarRecords: [],
+  calendarStats: { workDays: 0, totalMinutes: 0, overtimeMinutes: 0, lateCount: 0 },
+  dashboardStats: { workDays: 0, totalMinutes: 0, overtimeMinutes: 0, lateCount: 0 },
   leaveSummary: {
     annualGranted: 20,
     carriedOver: 2,

@@ -347,10 +347,99 @@ async function loadAdminShiftsSafely() {
     state.toast = "シフト申請の取得に失敗しました。";
   }
 }
+const STANDARD_START_MINUTES = 9 * 60; // 遅刻判定の基準（09:00 JST）
+function jstMinutesOfDay(timestamp) {
+  const hhmm = utcToJapanTime(timestamp, { seconds: false });
+  if (!hhmm) return null;
+  const [hour, minute] = hhmm.split(":").map(Number);
+  return hour * 60 + minute;
+}
+function monthlyStatsFromRecords(records) {
+  return (records || []).reduce((stats, record) => {
+    if (!record.clock_in || record.status === "paid_leave" || record.status === "holiday") return stats;
+    stats.workDays += 1;
+    const startMinutes = jstMinutesOfDay(record.clock_in);
+    if (startMinutes !== null && startMinutes > STANDARD_START_MINUTES) stats.lateCount += 1;
+    if (record.clock_out) {
+      const worked = (new Date(record.clock_out).getTime() - new Date(record.clock_in).getTime()) / 60000 - recordBreakMinutes(record);
+      stats.totalMinutes += Math.max(worked, 0);
+      stats.overtimeMinutes += Math.max(worked - BASE_WORK_MINUTES, 0);
+    }
+    return stats;
+  }, { workDays: 0, totalMinutes: 0, overtimeMinutes: 0, lateCount: 0 });
+}
+function monthRange(year, monthIndex) {
+  const monthText = String(monthIndex + 1).padStart(2, "0");
+  const start = `${year}-${monthText}-01`;
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  const end = `${year}-${monthText}-${String(lastDay).padStart(2, "0")}`;
+  return { start, end };
+}
+function ensureCalendarMonth() {
+  if (state.calendar) return;
+  const iso = currentIsoDate();
+  const [year, month] = iso.split("-").map(Number);
+  state.calendar = { year, monthIndex: month - 1 };
+}
+function canReadAttendance() {
+  return Boolean(
+    state.currentUser?.id &&
+    window.supabaseAuth?.isConfigured() &&
+    window.supabaseAuth?.listAttendancesByRange
+  );
+}
+async function loadDashboardStats() {
+  if (!canReadAttendance()) return;
+  const iso = currentIsoDate();
+  const [year, month] = iso.split("-").map(Number);
+  const { start, end } = monthRange(year, month - 1);
+  const rows = await window.supabaseAuth.listAttendancesByRange(state.currentUser.id, start, end);
+  state.dashboardStats = monthlyStatsFromRecords(rows);
+}
+async function loadCalendarMonth() {
+  if (!canReadAttendance()) return;
+  ensureCalendarMonth();
+  const { year, monthIndex } = state.calendar;
+  const { start, end } = monthRange(year, monthIndex);
+  const rows = await window.supabaseAuth.listAttendancesByRange(state.currentUser.id, start, end);
+  state.calendarRecords = rows;
+  state.calendarStats = monthlyStatsFromRecords(rows);
+}
+async function loadDashboardStatsSafely() {
+  try {
+    await loadDashboardStats();
+  } catch (error) {
+    console.error(error);
+    state.toast = "勤怠集計の取得に失敗しました。";
+  }
+}
+async function loadCalendarMonthSafely() {
+  try {
+    await loadCalendarMonth();
+  } catch (error) {
+    console.error(error);
+    state.toast = "カレンダーの勤怠取得に失敗しました。";
+  }
+}
+async function shiftCalendarMonth(delta) {
+  ensureCalendarMonth();
+  const base = new Date(state.calendar.year, state.calendar.monthIndex + delta, 1);
+  state.calendar = { year: base.getFullYear(), monthIndex: base.getMonth() };
+  await loadCalendarMonthSafely();
+  render();
+}
 async function loadPageDataSafely() {
   if (!state.isLoggedIn) return;
   if (state.path === "/shift-request" || state.path === "/dashboard") {
     await loadShiftsSafely();
+    render();
+  }
+  if (state.path === "/dashboard") {
+    await loadDashboardStatsSafely();
+    render();
+  }
+  if (state.path === "/calendar") {
+    await loadCalendarMonthSafely();
     render();
   }
   if (state.path === "/admin/shifts") {
@@ -581,6 +670,10 @@ function renderPage() {
 function renderDashboard() {
   const pending = state.approvals.filter((item) => item.status === "pending").length;
   const missing = state.employees.filter((item) => item.status === "未出勤").length;
+  const stats = state.dashboardStats;
+  const leave = leaveBalance();
+  const [statYear, statMonth] = currentIsoDate().split("-").map(Number);
+  const monthLabel = `${statYear}年${statMonth}月`;
   return `
     <section class="dashboard-kpi-section">
       <div class="dashboard-kpi-header">
@@ -597,30 +690,34 @@ function renderDashboard() {
         <article class="kpi-card">
           <div class="kpi-card-top">
             <div class="kpi-label">出勤日数</div>
-            <div class="kpi-icon">${icon("calendar")}</div>
+            <div class="kpi-icon metric-badge attend">${icon("calendar")}</div>
           </div>
-          <div class="kpi-value"><strong>0</strong><span>日</span></div>
+          <div class="kpi-value"><strong>${stats.workDays}</strong><span>日</span></div>
+          <div class="kpi-note">${monthLabel}</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-card-top">
-            <div class="kpi-label">勤務時間</div>
-            <div class="kpi-icon">${icon("clock")}</div>
+            <div class="kpi-label">遅刻回数</div>
+            <div class="kpi-icon metric-badge late">${icon("clock")}</div>
           </div>
-          <div class="kpi-value"><strong>0</strong><span>h</span></div>
+          <div class="kpi-value"><strong>${stats.lateCount}</strong><span>回</span></div>
+          <div class="kpi-note">09:00以降の出勤打刻</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-card-top">
-            <div class="kpi-label">残業</div>
+            <div class="kpi-label">残業時間</div>
+            <div class="kpi-icon metric-badge over">${icon("report")}</div>
           </div>
-          <div class="kpi-value"><strong>0</strong><span>/45h</span></div>
-          <div class="kpi-progress"><span style="width:0%"></span></div>
+          <div class="kpi-value"><strong>${formatMinutes(stats.overtimeMinutes)}</strong><span>時間</span></div>
+          <div class="kpi-note">所定8時間の超過分</div>
         </article>
         <article class="kpi-card">
           <div class="kpi-card-top">
             <div class="kpi-label">有給残</div>
+            <div class="kpi-icon metric-badge leave">${icon("departments")}</div>
           </div>
-          <div class="kpi-value"><strong>17.5</strong><span>日</span></div>
-          <div class="kpi-note">今年度の利用可能な有給残日数</div>
+          <div class="kpi-value"><strong>${leave.remaining}</strong><span>日</span></div>
+          <div class="kpi-note">付与 ${leave.grantedTotal}日 / 消化 ${leave.usedDays}日</div>
         </article>
       </div>
     </section>
@@ -1656,6 +1753,11 @@ document.addEventListener("click", async (event) => {
   if ("cancelReport" in target.dataset) {
     state.reportEditingId = null;
     render();
+    return;
+  }
+  const calNav = target.dataset.calNav;
+  if (calNav) {
+    await shiftCalendarMonth(calNav === "next" ? 1 : -1);
     return;
   }
   const shiftDecision = target.dataset.shiftDecision;

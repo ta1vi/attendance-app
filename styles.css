@@ -18,6 +18,8 @@
   --danger-soft: #ffe4df;
   --ok: #15803d;
   --ok-soft: #ddf7e8;
+  --neon: #39ff14;
+  --neon-soft: rgba(57, 255, 20, 0.18);
   --shadow: 0 18px 45px rgba(33, 45, 57, 0.08);
   --radius: 8px;
   font-family: Inter, "Noto Sans JP", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -487,6 +489,54 @@ button {
   font-size: 12px;
   text-align: right;
 }
+.stat-corner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.stat-corner .stat-note {
+  margin-top: 0;
+}
+/* 指標を一目で識別する色分けアイコンバッジ（ダッシュボード / カレンダー共通） */
+.metric-badge {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: #647485;
+  background: #f1f5f9;
+}
+.metric-badge .icon,
+.metric-badge .icon svg {
+  width: 20px;
+  height: 20px;
+}
+.metric-badge .icon svg {
+  stroke-width: 2.2;
+}
+.metric-badge.attend {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.metric-badge.time {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+.metric-badge.over {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.metric-badge.late {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.metric-badge.leave {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 .status-hero {
   min-height: 0;
   display: grid;
@@ -782,13 +832,79 @@ tr:last-child td {
   background: var(--muted);
 }
 .dot.attendance {
-  background: var(--primary);
+  background: var(--neon);
+  box-shadow: 0 0 6px var(--neon), 0 0 2px var(--neon);
 }
 .dot.leave {
   background: var(--accent);
 }
 .dot.shift {
   background: var(--warn);
+}
+.dot.warn {
+  background: var(--warn);
+}
+.calendar-stats-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+/* カレンダー集計カードは3枚とも同じ縦構造で揃える（上段=ラベル+バッジ / 中央=数値 / 下=補足） */
+.calendar-stats-grid .stat-card {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 10px;
+  min-height: 132px;
+}
+.calendar-stats-grid .stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.calendar-stats-grid .stat-value {
+  margin-top: 0;
+}
+.calendar-stats-grid .stat-note {
+  margin-top: auto;
+  text-align: left;
+}
+/* 3カードの横軸を揃える: ラベル/バッジは上端、数値/注記は下端に固定 */
+.calendar-stats-grid .stat-card {
+  align-items: stretch;
+}
+.calendar-stats-grid .stat-card > div:first-child {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.calendar-stats-grid .stat-card .stat-value {
+  margin-top: 8px;
+  line-height: 1.2;
+}
+.calendar-stats-grid .stat-corner {
+  justify-content: space-between;
+}
+@media (max-width: 620px) {
+  .calendar-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.calendar-nav h2 {
+  margin: 0;
+  min-width: 120px;
+  text-align: center;
+}
+.calendar-day.is-today {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 .calendar-grid {
   display: grid;
@@ -829,7 +945,8 @@ tr:last-child td {
   background: #f8fafc;
 }
 .calendar-day.has-attendance {
-  background: linear-gradient(180deg, #ffffff, rgba(217, 243, 239, 0.75));
+  background: linear-gradient(180deg, #ffffff, var(--neon-soft));
+  box-shadow: inset 3px 0 0 var(--neon);
 }
 .calendar-day.has-warning {
   background: #fff9ee;

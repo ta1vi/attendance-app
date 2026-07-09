@@ -158,6 +158,21 @@
     return data;
   }
 
+  // 指定期間の勤怠を取得（RLS により member は自分の勤怠のみ）
+  async function listAttendancesByRange(userId, startDate, endDate) {
+    if (!client) return [];
+    const { data, error } = await client
+      .from("attendances")
+      .select(attendanceColumns)
+      .eq("user_id", userId)
+      .gte("work_date", startDate)
+      .lte("work_date", endDate)
+      .order("work_date", { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  }
+
   async function updateAttendance(id, payload) {
     if (!client) throw new Error(initErrorMessage() || "Supabaseクライアントを初期化できませんでした。");
     const { data, error } = await client
@@ -265,6 +280,7 @@
     getAttendanceByDate,
     createAttendance,
     updateAttendance,
+    listAttendancesByRange,
     listShifts,
     listShiftsForAdmin,
     createShift,

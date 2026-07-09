@@ -88,13 +88,16 @@ function renderShiftRequestHistory() {
     </div>
   `;
 }
-function renderLeaveRequest() {
+function leaveBalance() {
   const approvedUsed = state.leaveRequests
     .filter((item) => item.status === "shift_approved")
     .reduce((total, item) => total + item.days, 0);
   const grantedTotal = state.leaveSummary.annualGranted + state.leaveSummary.carriedOver;
   const usedDays = Math.max(state.leaveSummary.used, approvedUsed);
-  const remaining = Math.max(grantedTotal - usedDays, 0);
+  return { grantedTotal, usedDays, remaining: Math.max(grantedTotal - usedDays, 0) };
+}
+function renderLeaveRequest() {
+  const { grantedTotal, usedDays, remaining } = leaveBalance();
   return `
     <section class="grid cols-3">
       <article class="card stat-card primary">
@@ -244,24 +247,38 @@ function renderOvertimeRequestHistory() {
   `;
 }
 function renderCalendar() {
-  const year = 2026;
-  const monthIndex = 6;
+  ensureCalendarMonth();
+  const { year, monthIndex } = state.calendar;
   const month = String(monthIndex + 1).padStart(2, "0");
   const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  const stats = state.calendarStats;
+  const today = currentIsoDate();
+  const recordByDate = new Map((state.calendarRecords || []).map((record) => [record.work_date, record]));
+  const isWorkedRecord = (record) => Boolean(record?.clock_in) && record.status !== "paid_leave" && record.status !== "holiday";
   return `
     <section class="panel">
       <div class="toolbar">
         <div class="panel-header" style="margin:0">
           <div>
-            <h2>2026年7月</h2>
-            <p>出勤日、休暇、承認済みシフトを月間で確認します</p>
+            <h2>勤怠カレンダー</h2>
+            <p>出勤日、有給、シフトを月間で確認します</p>
           </div>
         </div>
         <div class="legend">
           <span><i class="dot attendance"></i>出勤</span>
-          <span><i class="dot leave"></i>休暇</span>
+          <span><i class="dot leave"></i>有給</span>
           <span><i class="dot shift"></i>シフト</span>
         </div>
+      </div>
+      <div class="grid calendar-stats-grid" style="margin:4px 0 16px">
+        <article class="card stat-card ok"><div class="stat-top"><div class="stat-label">出勤日数</div><span class="metric-badge attend">${icon("calendar")}</span></div><div class="stat-value">${stats.workDays}日</div><div class="stat-note">${year}年${monthIndex + 1}月</div></article>
+        <article class="card stat-card primary"><div class="stat-top"><div class="stat-label">合計勤務時間</div><span class="metric-badge time">${icon("clock")}</span></div><div class="stat-value">${formatMinutes(stats.totalMinutes)}</div><div class="stat-note">休憩を除く実働</div></article>
+        <article class="card stat-card warn"><div class="stat-top"><div class="stat-label">残業時間</div><span class="metric-badge over">${icon("report")}</span></div><div class="stat-value">${formatMinutes(stats.overtimeMinutes)}</div><div class="stat-note">所定8時間の超過分</div></article>
+      </div>
+      <div class="calendar-nav">
+        <button class="button neutral compact" data-cal-nav="prev" aria-label="前の月">${icon("chevronLeft")}前月</button>
+        <h2>${year}年${monthIndex + 1}月</h2>
+        <button class="button neutral compact" data-cal-nav="next" aria-label="次の月">翌月${icon("chevronRight")}</button>
       </div>
       <div class="calendar-grid">
         ${weekdays.map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
@@ -270,18 +287,22 @@ function renderCalendar() {
           const dayText = String(day).padStart(2, "0");
           const isoDate = `${year}-${month}-${dayText}`;
           const displayDate = `${year}/${month}/${dayText}`;
-          const row = state.history.find((item) => item.id === isoDate);
+          const record = recordByDate.get(isoDate);
+          const worked = isWorkedRecord(record);
           const shift = state.shiftRequests.find((item) => item.requestDate === displayDate && item.status !== "shift_rejected");
           const dayClasses = ["calendar-day"];
-          if (isAttendanceDay(row)) dayClasses.push("has-attendance");
-          if (row?.status === "missing_clock_out") dayClasses.push("has-warning");
-          if (row?.status === "paid_leave") dayClasses.push("has-leave");
+          if (worked) dayClasses.push("has-attendance");
+          if (record?.status === "missing_clock_out") dayClasses.push("has-warning");
+          if (record?.status === "paid_leave") dayClasses.push("has-leave");
+          if (isoDate === today) dayClasses.push("is-today");
+          const clockIn = record?.clock_in ? utcToJapanTime(record.clock_in, { seconds: false }) : "";
           return `
             <div class="${dayClasses.join(" ")}">
               <div class="calendar-date">${day}</div>
               <div class="calendar-marks">
-                ${isAttendanceDay(row) ? `<span><i class="dot attendance"></i>出勤</span>` : ""}
-                ${row?.status === "paid_leave" ? `<span><i class="dot leave"></i>有給</span>` : ""}
+                ${worked ? `<span><i class="dot attendance"></i>${clockIn || "出勤"}</span>` : ""}
+                ${record?.status === "paid_leave" ? `<span><i class="dot leave"></i>有給</span>` : ""}
+                ${record?.status === "missing_clock_out" ? `<span><i class="dot warn"></i>退勤漏れ</span>` : ""}
                 ${shift ? `<span><i class="dot shift"></i>${escapeHtml(shift.shift)}</span>` : ""}
               </div>
             </div>
